@@ -302,9 +302,26 @@ func (a *App) networkPoller() {
 	}
 }
 
+// seedPeers is how many nodes are connected to the seed right now — the live
+// signal of SOLO miners (pool workers poll HTTP and never appear as peers).
+func seedPeers() int {
+	r, err := rpcCall("chain_miningStats", []interface{}{})
+	if err != nil || r == nil {
+		return 0
+	}
+	var d struct {
+		Peers int `json:"peers"`
+	}
+	if json.Unmarshal(r, &d) != nil {
+		return 0
+	}
+	return d.Peers
+}
+
 func (a *App) fetchNetwork() {
 	height, diff, blkTime := chainStats()
 	miners, poolHs, paid, pblocks := poolStats()
+	miners += seedPeers() // live now = pool workers + solo nodes on the seed
 	a.mu.Lock()
 	if height > 0 {
 		a.netHeight = height
@@ -338,12 +355,14 @@ func (a *App) GetState() map[string]interface{} {
 		reward /= 2
 	}
 
-	// Mode-aware stats. Share-of-pool and live-miner-count only exist in pool
-	// mode; showing 0.00% / 0 in solo read as "broken" (a real user complaint).
+	// Mode-aware stats. Miners-live-now is NETWORK-WIDE (pool workers + solo
+	// nodes on the seed) and shows in both modes. Share-of-pool only exists in
+	// pool mode; 0.00% in solo read as "broken" (a real user complaint).
 	// Est/day and block time derive from difficulty (= expected hashes/block):
 	// measuring block time from chain timestamps is garbage on a young chain
 	// with idle gaps (it once showed "530 min").
-	shareStr, minersStr := "—", "—"
+	shareStr := "—"
+	minersStr := fmt.Sprintf("%d", a.minersNow)
 	estDay, expectSec := 0.0, 0.0
 	if a.mode == "pool" {
 		frac := 0.0
@@ -354,7 +373,6 @@ func (a *App) GetState() map[string]interface{} {
 			}
 		}
 		shareStr = fmt.Sprintf("%.2f%%", frac*100)
-		minersStr = fmt.Sprintf("%d", a.minersNow)
 		if a.diffRaw > 0 && a.poolHashHs > 0 {
 			expectSec = float64(a.diffRaw) / a.poolHashHs
 			estDay = frac * reward * (86400.0 / expectSec)
