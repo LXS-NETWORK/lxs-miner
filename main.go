@@ -18,9 +18,9 @@ func main() {
 	err := wails.Run(&options.App{
 		Title:     "LXS Miner",
 		Width:     560,
-		Height:    760,
+		Height:    860,
 		MinWidth:  520,
-		MinHeight: 680,
+		MinHeight: 720,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

@@ -6,18 +6,34 @@ export function CreateWallet() {
   return window['go']['main']['App']['CreateWallet']();
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function GetState() {
   return window['go']['main']['App']['GetState']();
+}
+
+export function Pause() {
+  return window['go']['main']['App']['Pause']();
+}
+
+export function Resume() {
+  return window['go']['main']['App']['Resume']();
 }
 
 export function SavedAddress() {
   return window['go']['main']['App']['SavedAddress']();
 }
 
+export function SetAutoStart(arg1) {
+  return window['go']['main']['App']['SetAutoStart'](arg1);
+}
+
 export function StartMining(arg1, arg2) {
   return window['go']['main']['App']['StartMining'](arg1, arg2);
 }
 
-export function StopMining() {
-  return window['go']['main']['App']['StopMining']();
+export function Stop() {
+  return window['go']['main']['App']['Stop']();
 }

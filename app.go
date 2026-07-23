@@ -31,9 +31,12 @@ var genesisFile []byte
 
 // Baked network config — the user only pastes their address.
 const (
-	poolURL = "https://lxsnetwork.duckdns.org"
-	rpcURL  = "https://lxsnetwork.duckdns.org"
-	seed    = "/ip4/79.72.25.166/tcp/30303/p2p/12D3KooWRSSSocSqWG978SWKpimQsti4WkmjytQX7g1qgJKnNzuA"
+	poolURL     = "https://lxsnetwork.duckdns.org"
+	rpcURL      = "https://lxsnetwork.duckdns.org"
+	seed        = "/ip4/79.72.25.166/tcp/30303/p2p/12D3KooWRSSSocSqWG978SWKpimQsti4WkmjytQX7g1qgJKnNzuA"
+	totalMined  = 100000000.0 // LXS mined over ~500 years
+	totalBlocks = 66000000    // approx blocks until the reward rounds to zero
+	halving     = 1000000
 )
 
 var (
@@ -47,7 +50,7 @@ type App struct {
 	ctx     context.Context
 	mu      sync.Mutex
 	cmd     *exec.Cmd
-	running bool
+	status  string // "idle" | "mining" | "paused"
 	address string
 	mode    string
 	logbuf  []string
@@ -55,12 +58,28 @@ type App struct {
 	shares  int
 	blocks  int
 	balance string
+
+	uptimeBase float64 // accumulated seconds before the current running segment
+	segStart   time.Time
+
+	// network (refreshed by a background poller)
+	netHeight   int64
+	coinsMined  float64
+	minersNow   int
+	poolHashHs  float64
+	difficulty  string
+	blockTime   float64 // seconds
+	poolPaid    string
+	poolBlocks  int
+
+	autoStart bool
+
 	binPath string
 	genPath string
 	dataDir string
 }
 
-func NewApp() *App { return &App{balance: "—", mode: "pool"} }
+func NewApp() *App { return &App{balance: "—", mode: "pool", status: "idle", difficulty: "—", poolPaid: "0"} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -77,17 +96,21 @@ func (a *App) startup(ctx context.Context) {
 	_ = writeIfChanged(a.binPath, lxsBinary, 0o755)
 	_ = writeIfChanged(a.genPath, genesisFile, 0o644)
 
-	// Load a previously created/saved address so the field is pre-filled.
 	if b, err := os.ReadFile(filepath.Join(a.dataDir, "wallet.json")); err == nil {
 		var w struct{ Address string }
 		if json.Unmarshal(b, &w) == nil {
 			a.address = w.Address
 		}
 	}
+	if b, err := os.ReadFile(filepath.Join(a.dataDir, "settings.json")); err == nil {
+		var s struct{ AutoStart bool }
+		if json.Unmarshal(b, &s) == nil {
+			a.autoStart = s.AutoStart
+		}
+	}
+	go a.networkPoller()
 }
 
-// writeIfChanged only rewrites the file when its bytes differ (a new binary can
-// share the old one's size, so compare content, not length).
 func writeIfChanged(path string, data []byte, mode os.FileMode) error {
 	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, data) {
 		return nil
@@ -98,17 +121,24 @@ func writeIfChanged(path string, data []byte, mode os.FileMode) error {
 	return os.Chmod(path, mode)
 }
 
-// ---------- bound methods (called from the UI) ----------
+// ---------- bound methods ----------
 
-// SavedAddress is the address remembered from a previous session (or "").
-func (a *App) SavedAddress() string {
+func (a *App) SavedAddress() string { a.mu.Lock(); defer a.mu.Unlock(); return a.address }
+
+func (a *App) GetSettings() map[string]interface{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.address
+	return map[string]interface{}{"autoStart": a.autoStart, "hasAddress": a.address != ""}
 }
 
-// CreateWallet generates a fresh keypair via `lxs keygen`, saves it, and returns
-// the address + private key so the UI can show the backup warning.
+func (a *App) SetAutoStart(on bool) {
+	a.mu.Lock()
+	a.autoStart = on
+	a.mu.Unlock()
+	b, _ := json.Marshal(map[string]bool{"AutoStart": on})
+	_ = os.WriteFile(filepath.Join(a.dataDir, "settings.json"), b, 0o600)
+}
+
 func (a *App) CreateWallet() (map[string]string, error) {
 	out, err := exec.Command(a.binPath, "keygen").Output()
 	if err != nil {
@@ -128,51 +158,91 @@ func (a *App) CreateWallet() (map[string]string, error) {
 		"path": filepath.Join(a.dataDir, "wallet.json")}, nil
 }
 
-// StartMining launches the miner. mode is "pool" or "solo".
+// spawn starts the miner process. Caller holds a.mu.
+func (a *App) spawn() error {
+	dataDir := filepath.Join(a.dataDir, "data")
+	var args []string
+	if a.mode == "solo" {
+		args = []string{"mine", "-coinbase", a.address, "-genesis", a.genPath,
+			"-p2p-port", "30303", "-bootstrap", seed, "-datadir", dataDir}
+	} else {
+		args = []string{"mine", "-pool", poolURL, "-coinbase", a.address, "-datadir", dataDir}
+	}
+	cmd := exec.Command(a.binPath, args...)
+	stdout, _ := cmd.StdoutPipe()
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	a.cmd = cmd
+	go a.readOutput(stdout)
+	return nil
+}
+
 func (a *App) StartMining(address, mode string) error {
 	address = strings.TrimSpace(address)
 	if !reValid.MatchString(address) {
 		return fmt.Errorf("Enter a valid LXS address (0x… 40 hex), or press Create wallet.")
 	}
 	a.mu.Lock()
-	if a.running {
-		a.mu.Unlock()
+	defer a.mu.Unlock()
+	if a.status == "mining" {
 		return nil
 	}
 	a.address, a.mode = address, mode
-	a.logbuf, a.shares, a.blocks, a.hashHs = nil, 0, 0, 0
-	dataDir := filepath.Join(a.dataDir, "data")
-	var args []string
-	if mode == "solo" {
-		args = []string{"mine", "-coinbase", address, "-genesis", a.genPath,
-			"-p2p-port", "30303", "-bootstrap", seed, "-datadir", dataDir}
-	} else {
-		args = []string{"mine", "-pool", poolURL, "-coinbase", address, "-datadir", dataDir}
-	}
-	cmd := exec.Command(a.binPath, args...)
-	stdout, _ := cmd.StdoutPipe()
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Start(); err != nil {
-		a.mu.Unlock()
+	a.logbuf, a.shares, a.blocks, a.hashHs, a.uptimeBase = nil, 0, 0, 0, 0
+	a.append("Starting miner (" + mode + ")…")
+	if err := a.spawn(); err != nil {
 		return fmt.Errorf("could not start the miner: %w", err)
 	}
-	a.cmd = cmd
-	a.running = true
-	a.append("Starting miner (" + mode + ")…")
-	a.mu.Unlock()
-
-	go a.readOutput(stdout)
+	a.status = "mining"
+	a.segStart = time.Now()
 	go a.pollBalance()
 	return nil
 }
 
-func (a *App) StopMining() {
+func (a *App) Pause() {
 	a.mu.Lock()
-	c := a.cmd
-	a.mu.Unlock()
-	if c != nil && c.Process != nil {
-		_ = c.Process.Kill()
+	defer a.mu.Unlock()
+	if a.status != "mining" {
+		return
 	}
+	a.killLocked()
+	a.uptimeBase += time.Since(a.segStart).Seconds()
+	a.status = "paused"
+	a.hashHs = 0
+	a.append("Paused.")
+}
+
+func (a *App) Resume() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.status != "paused" {
+		return
+	}
+	a.append("Resuming…")
+	if err := a.spawn(); err != nil {
+		a.append("Could not resume: " + err.Error())
+		return
+	}
+	a.status = "mining"
+	a.segStart = time.Now()
+}
+
+func (a *App) Stop() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.killLocked()
+	a.status = "idle"
+	a.hashHs, a.uptimeBase = 0, 0
+	a.append("Stopped.")
+}
+
+func (a *App) killLocked() {
+	if a.cmd != nil && a.cmd.Process != nil {
+		_ = a.cmd.Process.Kill()
+	}
+	a.cmd = nil
 }
 
 func (a *App) readOutput(r interface{ Read([]byte) (int, error) }) {
@@ -193,10 +263,6 @@ func (a *App) readOutput(r interface{ Read([]byte) (int, error) }) {
 		}
 		a.mu.Unlock()
 	}
-	a.mu.Lock()
-	a.running = false
-	a.append("Miner stopped.")
-	a.mu.Unlock()
 }
 
 func (a *App) append(line string) {
@@ -209,7 +275,7 @@ func (a *App) append(line string) {
 func (a *App) pollBalance() {
 	for {
 		a.mu.Lock()
-		running, addr := a.running, a.address
+		st, addr := a.status, a.address
 		a.mu.Unlock()
 		if addr != "" {
 			if v, err := rpcBalance(addr); err == nil {
@@ -218,59 +284,196 @@ func (a *App) pollBalance() {
 				a.mu.Unlock()
 			}
 		}
-		if !running {
+		if st == "idle" {
 			return
 		}
-		time.Sleep(15 * time.Second)
+		time.Sleep(12 * time.Second)
 	}
 }
 
-// GetState is polled by the UI ~every 2s for everything it shows.
+// networkPoller keeps the network-wide numbers fresh for the dashboard.
+func (a *App) networkPoller() {
+	a.fetchNetwork()
+	for range time.Tick(10 * time.Second) {
+		a.fetchNetwork()
+	}
+}
+
+func (a *App) fetchNetwork() {
+	height, diff, blkTime := chainStats()
+	miners, poolHs, paid, pblocks := poolStats()
+	a.mu.Lock()
+	if height > 0 {
+		a.netHeight = height
+		a.coinsMined = coinsMined(height)
+		a.difficulty = groupThousands(fmt.Sprintf("%d", diff))
+		a.blockTime = blkTime
+	}
+	a.minersNow, a.poolHashHs, a.poolPaid, a.poolBlocks = miners, poolHs, paid, pblocks
+	a.mu.Unlock()
+}
+
+// GetState is polled by the UI (~every 2s).
 func (a *App) GetState() map[string]interface{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	hr := "—"
-	if a.hashHs > 0 {
-		if a.hashHs >= 1e6 {
-			hr = fmt.Sprintf("%.2f MH/s", a.hashHs/1e6)
-		} else if a.hashHs >= 1e3 {
-			hr = fmt.Sprintf("%.1f kH/s", a.hashHs/1e3)
-		} else {
-			hr = fmt.Sprintf("%.0f H/s", a.hashHs)
-		}
+
+	up := a.uptimeBase
+	if a.status == "mining" {
+		up += time.Since(a.segStart).Seconds()
+	}
+	share := 0.0
+	if a.poolHashHs > 0 && a.hashHs > 0 {
+		share = a.hashHs / a.poolHashHs * 100
+	}
+	// est LXS/day = yourShareOfPool × 50 × blocksPerDay
+	estDay := 0.0
+	if a.poolHashHs > 0 && a.hashHs > 0 && a.blockTime > 0 {
+		frac := a.hashHs / a.poolHashHs
+		blocksPerDay := 86400.0 / a.blockTime
+		estDay = frac * 50.0 * blocksPerDay
+	}
+	remaining := totalMined - a.coinsMined
+	if remaining < 0 {
+		remaining = 0
+	}
+	blocksLeft := int64(totalBlocks) - a.netHeight
+	if blocksLeft < 0 {
+		blocksLeft = 0
 	}
 	tail := a.logbuf
 	if len(tail) > 120 {
 		tail = tail[len(tail)-120:]
 	}
 	return map[string]interface{}{
-		"running":  a.running,
-		"address":  a.address,
-		"mode":     a.mode,
-		"balance":  a.balance,
-		"hashrate": hr,
-		"shares":   a.shares,
-		"blocks":   a.blocks,
-		"log":      strings.Join(tail, "\n"),
+		"status":     a.status,
+		"address":    a.address,
+		"mode":       a.mode,
+		"balance":    a.balance,
+		"hashrate":   fmtHash(a.hashHs),
+		"hashRaw":    a.hashHs,
+		"shares":     a.shares,
+		"blocks":     a.blocks,
+		"uptime":     fmtDuration(up),
+		"sharePct":   fmt.Sprintf("%.2f%%", share),
+		"estPerDay":  fmt.Sprintf("%.2f", estDay),
+		"netHeight":  groupThousands(fmt.Sprintf("%d", a.netHeight)),
+		"coinsMined": fmt.Sprintf("%.0f", a.coinsMined),
+		"coinsLeft":  groupThousands(fmt.Sprintf("%.0f", remaining)),
+		"minedPct":   a.coinsMined / totalMined * 100,
+		"blocksLeft": groupThousands(fmt.Sprintf("%d", blocksLeft)),
+		"minersNow":  a.minersNow,
+		"poolHash":   fmtHash(a.poolHashHs),
+		"difficulty": a.difficulty,
+		"blockTime":  fmtBlockTime(a.blockTime),
+		"poolPaid":   a.poolPaid,
+		"poolBlocks": a.poolBlocks,
+		"log":        strings.Join(tail, "\n"),
 	}
 }
 
-func rpcBalance(addr string) (string, error) {
-	body, _ := json.Marshal(map[string]interface{}{
-		"jsonrpc": "2.0", "method": "eth_getBalance", "params": []interface{}{addr, "latest"}, "id": 1})
+// ---------- helpers ----------
+
+func coinsMined(height int64) float64 {
+	reward, era, total, h := 50.0, int64(halving), 0.0, height
+	for h > 0 && reward >= 1e-9 {
+		take := h
+		if take > era {
+			take = era
+		}
+		total += float64(take) * reward
+		h -= take
+		reward /= 2
+	}
+	return total
+}
+
+func fmtHash(hs float64) string {
+	if hs <= 0 {
+		return "—"
+	}
+	if hs >= 1e6 {
+		return fmt.Sprintf("%.2f MH/s", hs/1e6)
+	}
+	if hs >= 1e3 {
+		return fmt.Sprintf("%.1f kH/s", hs/1e3)
+	}
+	return fmt.Sprintf("%.0f H/s", hs)
+}
+
+func fmtBlockTime(s float64) string {
+	if s <= 0 {
+		return "—"
+	}
+	if s >= 60 {
+		return fmt.Sprintf("%.1f min", s/60)
+	}
+	return fmt.Sprintf("%.0f s", s)
+}
+
+func fmtDuration(sec float64) string {
+	s := int64(sec)
+	h := s / 3600
+	m := (s % 3600) / 60
+	ss := s % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %02dm", h, m)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %02ds", m, ss)
+	}
+	return fmt.Sprintf("%ds", ss)
+}
+
+func groupThousands(s string) string {
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	n := len(s)
+	if n <= 3 {
+		if neg {
+			return "-" + s
+		}
+		return s
+	}
+	var out []string
+	for n > 3 {
+		out = append([]string{s[n-3 : n]}, out...)
+		n -= 3
+	}
+	out = append([]string{s[:n]}, out...)
+	r := strings.Join(out, ",")
+	if neg {
+		return "-" + r
+	}
+	return r
+}
+
+// ---------- RPC ----------
+
+func rpcCall(method string, params []interface{}) (json.RawMessage, error) {
+	body, _ := json.Marshal(map[string]interface{}{"jsonrpc": "2.0", "method": method, "params": params, "id": 1})
 	resp, err := http.Post(rpcURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var d struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return nil, err
+	}
+	return d.Result, nil
+}
+
+func rpcBalance(addr string) (string, error) {
+	r, err := rpcCall("eth_getBalance", []interface{}{addr, "latest"})
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	var d struct{ Result string }
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return "", err
-	}
-	if d.Result == "" {
-		return "", fmt.Errorf("no result")
-	}
-	wei, ok := new(big.Int).SetString(strings.TrimPrefix(d.Result, "0x"), 16)
+	var hex string
+	json.Unmarshal(r, &hex)
+	wei, ok := new(big.Int).SetString(strings.TrimPrefix(hex, "0x"), 16)
 	if !ok {
 		return "", fmt.Errorf("bad balance")
 	}
@@ -280,16 +483,64 @@ func rpcBalance(addr string) (string, error) {
 	return fmt.Sprintf("%s.%s", groupThousands(whole.String()), f), nil
 }
 
-func groupThousands(s string) string {
-	n := len(s)
-	if n <= 3 {
-		return s
+type blockHdr struct {
+	Number     string `json:"number"`
+	Timestamp  string `json:"timestamp"`
+	Difficulty string `json:"difficulty"`
+}
+
+func chainStats() (height int64, difficulty int64, blockTime float64) {
+	r, err := rpcCall("eth_getBlockByNumber", []interface{}{"latest", false})
+	if err != nil || r == nil {
+		return 0, 0, 0
 	}
-	var out []string
-	for n > 3 {
-		out = append([]string{s[n-3 : n]}, out...)
-		n -= 3
+	var latest blockHdr
+	if json.Unmarshal(r, &latest) != nil {
+		return 0, 0, 0
 	}
-	out = append([]string{s[:n]}, out...)
-	return strings.Join(out, ",")
+	height = hexToInt(latest.Number)
+	difficulty = hexToInt(latest.Difficulty)
+	// block time from a few blocks back
+	if height >= 6 {
+		if r2, err := rpcCall("eth_getBlockByNumber", []interface{}{fmt.Sprintf("0x%x", height-5), false}); err == nil {
+			var past blockHdr
+			if json.Unmarshal(r2, &past) == nil {
+				dt := hexToInt(latest.Timestamp) - hexToInt(past.Timestamp)
+				if dt > 0 {
+					blockTime = float64(dt) / 5.0
+				}
+			}
+		}
+	}
+	return
+}
+
+func poolStats() (miners int, hashHs float64, paid string, blocks int) {
+	resp, err := http.Get(strings.TrimRight(poolURL, "/") + "/pool/stats")
+	if err != nil {
+		return 0, 0, "0", 0
+	}
+	defer resp.Body.Close()
+	var d struct {
+		MinersActive int     `json:"minersActive"`
+		Hashrate     float64 `json:"hashrate"`
+		TotalPaidWei string  `json:"totalPaidWei"`
+		BlocksFound  int     `json:"blocksFound"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&d) != nil {
+		return 0, 0, "0", 0
+	}
+	paid = "0"
+	if w, ok := new(big.Int).SetString(d.TotalPaidWei, 10); ok {
+		paid = groupThousands(new(big.Int).Div(w, big.NewInt(1e18)).String())
+	}
+	return d.MinersActive, d.Hashrate, paid, d.BlocksFound
+}
+
+func hexToInt(h string) int64 {
+	v, ok := new(big.Int).SetString(strings.TrimPrefix(h, "0x"), 16)
+	if !ok {
+		return 0
+	}
+	return v.Int64()
 }

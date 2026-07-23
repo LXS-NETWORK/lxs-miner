@@ -3,10 +3,18 @@
 
 export function CreateWallet():Promise<Record<string, string>>;
 
+export function GetSettings():Promise<Record<string, any>>;
+
 export function GetState():Promise<Record<string, any>>;
+
+export function Pause():Promise<void>;
+
+export function Resume():Promise<void>;
 
 export function SavedAddress():Promise<string>;
 
+export function SetAutoStart(arg1:boolean):Promise<void>;
+
 export function StartMining(arg1:string,arg2:string):Promise<void>;
 
-export function StopMining():Promise<void>;
+export function Stop():Promise<void>;

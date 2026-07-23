@@ -6,7 +6,27 @@
   <title>LXS Miner</title>
 </head>
 <body>
-<div class="app">
+
+<!-- SPLASH -->
+<section id="splash">
+  <div class="splash-logo">
+    <svg viewBox="0 0 256 256" width="150" height="150">
+      <defs>
+        <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#46e5a1"/><stop offset="1" stop-color="#3aa0ff"/></linearGradient>
+        <radialGradient id="disc" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#151a24"/><stop offset="1" stop-color="#0d0f14"/></radialGradient>
+      </defs>
+      <circle cx="128" cy="128" r="120" fill="url(#disc)"/>
+      <circle cx="128" cy="128" r="120" fill="none" stroke="#262c3a" stroke-width="2"/>
+      <circle class="spin" cx="128" cy="128" r="86" fill="none" stroke="url(#ring)" stroke-width="12" stroke-dasharray="120 420" stroke-linecap="round"/>
+      <circle cx="128" cy="42" r="15" fill="#46e5a1"/>
+      <text x="128" y="132" font-family="Helvetica,Arial" font-weight="800" font-size="54" letter-spacing="2" fill="#eef3fb" text-anchor="middle" dominant-baseline="central">LXS</text>
+    </svg>
+  </div>
+  <div class="splash-title"><span class="wm">LXS</span> Miner</div>
+  <div class="splash-sub">Proof-of-work Layer-1 · mine it, own it</div>
+</section>
+
+<div class="app" id="mainapp" style="display:none">
   <header class="top">
     <span class="brand">◍ <span class="wm">LXS</span> Miner</span>
     <span class="net" id="netdot">● live</span>
@@ -18,38 +38,65 @@
       <label class="lbl">Your LXS address <span class="dim">(rewards go here)</span></label>
       <div class="row">
         <input id="addr" class="input" placeholder="0x…" autocomplete="off" spellcheck="false"/>
-        <button id="create" class="ghost">Create wallet</button>
+        <button id="create" class="ghost">Create</button>
       </div>
-      <p class="hint">No address? Press <b>Create wallet</b> — it makes one and shows you the key to back up.</p>
+      <p class="hint">No address? Press <b>Create</b> — it makes one and shows you the key to back up.</p>
     </div>
-
-    <div class="card">
-      <label class="lbl">How to mine</label>
-      <label class="opt"><input type="radio" name="mode" value="pool" checked>
-        <span><b>Pool</b> <em>recommended</em><br><span class="dim">Team up — steady, proportional payouts. Best for normal computers.</span></span></label>
-      <label class="opt"><input type="radio" name="mode" value="solo">
-        <span><b>Solo</b><br><span class="dim">Keep the whole 50 LXS per block, but only when you win one.</span></span></label>
-    </div>
-
-    <button id="start" class="primary">⛏  Start mining</button>
+    <button id="continue" class="primary">Continue  →</button>
   </section>
 
-  <!-- MINING -->
-  <section id="mining" style="display:none">
+  <!-- DASHBOARD -->
+  <section id="dash" style="display:none">
     <div class="balcard">
       <div class="baln"><span id="balance">—</span> <span class="balu">LXS</span></div>
-      <div class="ball" id="balfor">your balance</div>
+      <div class="ball">coins collected <span id="balfor" class="dim"></span></div>
     </div>
+
+    <div class="seg" id="modeseg">
+      <button class="segbtn on" data-mode="pool">Pool <em>recommended</em></button>
+      <button class="segbtn" data-mode="solo">Solo</button>
+    </div>
+
+    <div class="controls">
+      <button id="start" class="primary">⛏  Start</button>
+      <button id="pause" class="ghost" style="display:none">⏸ Pause</button>
+      <button id="resume" class="primary" style="display:none">▶ Resume</button>
+      <button id="stop" class="ghost danger" style="display:none">■ Stop</button>
+    </div>
+
+    <div class="statusrow"><span id="status" class="dim">● Idle</span><span id="uptime" class="dim"></span></div>
+
+    <div class="chartcard">
+      <div class="charttop"><span>Your hashrate</span><span id="hashnow" class="hgrad">—</span></div>
+      <canvas id="chart" width="500" height="90"></canvas>
+    </div>
+
     <div class="stats">
-      <div class="stat"><div class="sv" id="hashrate">—</div><div class="sl">Hashrate</div></div>
-      <div class="stat"><div class="sv" id="shares">0</div><div class="sl">Shares</div></div>
-      <div class="stat"><div class="sv" id="blocks">0</div><div class="sl">Blocks</div></div>
+      <div class="stat"><div class="sv" id="s-blocks">0</div><div class="sl">Blocks found</div></div>
+      <div class="stat"><div class="sv" id="s-share">0%</div><div class="sl">Your share</div></div>
+      <div class="stat"><div class="sv" id="s-est">0</div><div class="sl">Est. LXS/day</div></div>
+      <div class="stat"><div class="sv" id="s-miners">0</div><div class="sl">Miners live now</div></div>
+      <div class="stat"><div class="sv" id="s-diff">—</div><div class="sl">Difficulty</div></div>
+      <div class="stat"><div class="sv" id="s-btime">—</div><div class="sl">Block time</div></div>
     </div>
-    <div class="statusrow">
-      <span id="status" class="ok">● Mining</span>
-      <button id="stop" class="ghost">■ Stop</button>
+
+    <div class="card netcard">
+      <div class="netrow"><span class="dim">Coins mined (network)</span><span><b id="n-mined">—</b> / 100M</span></div>
+      <div class="bar"><span id="n-bar"></span></div>
+      <div class="netrow2">
+        <span><b id="n-left">—</b><br><span class="dim">coins left</span></span>
+        <span><b id="n-height">—</b><br><span class="dim">blocks mined</span></span>
+        <span><b id="n-bleft">—</b><br><span class="dim">blocks left</span></span>
+        <span><b id="n-paid">—</b><br><span class="dim">pool paid (0% fee)</span></span>
+      </div>
     </div>
+
     <pre id="log" class="log"></pre>
+
+    <div class="botrow">
+      <button id="copy" class="linkbtn">📋 Copy address</button>
+      <label class="switch"><input type="checkbox" id="autostart"> Start mining when I open the app</label>
+    </div>
   </section>
 
   <p class="foot">Chain 22540 · lxs-network.github.io</p>
@@ -65,12 +112,14 @@
     <div class="mono key" id="m-key"></div>
     <div class="warn">Whoever holds this key owns the coins. Save it offline, somewhere safe. It is also stored on this computer at the path below — but keep your own backup too.</div>
     <div class="mono path" id="m-path"></div>
-    <div class="row">
+    <div class="row" style="justify-content:flex-end">
       <button id="m-copy" class="ghost">Copy key</button>
       <button id="m-ok" class="primary sm">I saved it</button>
     </div>
   </div>
 </div>
+
+<div id="toasts"></div>
 
 <script src="./src/main.js" type="module"></script>
 </body>
