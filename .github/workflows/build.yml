@@ -58,11 +58,9 @@ jobs:
         with: { go-version: '1.25' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-      - name: Install NSIS + Wails
+      - name: Install Wails
         shell: bash
-        run: |
-          choco install nsis -y
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
       - name: Build lxs core (windows)
         shell: bash
         run: |
@@ -73,18 +71,17 @@ jobs:
         shell: bash
         run: |
           export PATH="$PATH:$(go env GOPATH)/bin"
-          wails build -platform windows/amd64 -nsis -trimpath
-      - name: Rename installer
+          wails build -platform windows/amd64 -trimpath
+      - name: Rename exe
         shell: bash
         run: |
           cd build/bin
-          f=$(ls *installer*.exe 2>/dev/null | head -1)
-          [ -n "$f" ] && mv "$f" "LXS-Miner-windows-installer.exe" || mv lxs-miner.exe "LXS-Miner-windows.exe"
+          ls -la
+          f=$(ls *.exe | grep -vi "LXS-Miner-windows" | head -1)
+          mv "$f" "LXS-Miner-windows.exe"
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/bin/LXS-Miner-windows-installer.exe
-            build/bin/LXS-Miner-windows.exe
+          files: build/bin/LXS-Miner-windows.exe
 
   # ---------------- Linux (AppImage-ready binary, tar.gz) ----------------
   linux:

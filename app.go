@@ -340,9 +340,12 @@ func (a *App) GetState() map[string]interface{} {
 	if remaining < 0 {
 		remaining = 0
 	}
-	blocksLeft := int64(totalBlocks) - a.netHeight
-	if blocksLeft < 0 {
-		blocksLeft = 0
+	// Current block reward at this height (halves every 1,000,000 blocks) — far
+	// clearer than "blocks left", since blocks don't all pay 50 LXS.
+	era := a.netHeight / halving
+	reward := 50.0
+	for i := int64(0); i < era; i++ {
+		reward /= 2
 	}
 	tail := a.logbuf
 	if len(tail) > 120 {
@@ -364,7 +367,7 @@ func (a *App) GetState() map[string]interface{} {
 		"coinsMined": fmt.Sprintf("%.0f", a.coinsMined),
 		"coinsLeft":  groupThousands(fmt.Sprintf("%.0f", remaining)),
 		"minedPct":   a.coinsMined / totalMined * 100,
-		"blocksLeft": groupThousands(fmt.Sprintf("%d", blocksLeft)),
+		"reward":     rewardStr(reward),
 		"minersNow":  a.minersNow,
 		"poolHash":   fmtHash(a.poolHashHs),
 		"difficulty": a.difficulty,
@@ -412,6 +415,13 @@ func fmtBlockTime(s float64) string {
 		return fmt.Sprintf("%.1f min", s/60)
 	}
 	return fmt.Sprintf("%.0f s", s)
+}
+
+func rewardStr(r float64) string {
+	if r == float64(int64(r)) {
+		return fmt.Sprintf("%d LXS", int64(r))
+	}
+	return fmt.Sprintf("%g LXS", r)
 }
 
 func fmtDuration(sec float64) string {

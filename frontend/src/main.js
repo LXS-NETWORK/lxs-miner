@@ -80,7 +80,7 @@ setInterval(async () => {
   $('n-mined').textContent = fmtM(s.coinsMined);
   $('n-left').textContent = s.coinsLeft;
   $('n-height').textContent = s.netHeight;
-  $('n-bleft').textContent = s.blocksLeft;
+  $('n-reward').textContent = s.reward;
   $('n-paid').textContent = s.poolPaid + ' LXS';
   $('n-bar').style.width = Math.max(0.5, s.minedPct) + '%';
 
