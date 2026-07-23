@@ -85,10 +85,11 @@ setInterval(async () => {
   $('n-bar').style.width = Math.max(0.5, s.minedPct) + '%';
 
   const st = s.status;
-  $('status').textContent = st === 'mining' ? '● Mining (' + s.mode + ')' : st === 'paused' ? '● Paused' : '● Idle';
-  $('status').className = st === 'mining' ? 'ok' : st === 'paused' ? 'warn' : 'stop';
+  const crashed = st === 'crashed';
+  $('status').textContent = st === 'mining' ? '● Mining (' + s.mode + ')' : st === 'paused' ? '● Paused' : crashed ? '● Stopped unexpectedly — press Resume to retry' : '● Idle';
+  $('status').className = st === 'mining' ? 'ok' : st === 'paused' ? 'warn' : crashed ? 'bad' : 'stop';
   $('pause').style.display  = st === 'mining' ? '' : 'none';
-  $('resume').style.display = st === 'paused' ? '' : 'none';
+  $('resume').style.display = (st === 'paused' || crashed) ? '' : 'none';
 
   const log = $('log');
   const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;

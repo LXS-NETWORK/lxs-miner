@@ -179,7 +179,32 @@ func (a *App) spawn() error {
 	}
 	a.cmd = cmd
 	go a.readOutput(stdout)
+	go a.watchExit(cmd)
 	return nil
+}
+
+// watchExit notices if the lxs child dies on its own — a crash, a locked datadir
+// (a previous orphaned solo node), a bad genesis, or a port clash. Without it the
+// scanner just hits EOF and the UI keeps reporting "Mining" at the last hashrate
+// forever, so the user thinks they are earning while nothing runs. An intentional
+// Kill (Pause/Stop/Resume/close) replaces or nils a.cmd first, so we only flag a
+// crash when the child that exited is still the current one. This is the sole
+// caller of Wait(), so it also reaps the process (no zombies).
+func (a *App) watchExit(cmd *exec.Cmd) {
+	err := cmd.Wait()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cmd != cmd || a.status != "mining" {
+		return // intentional stop/replace — not a crash
+	}
+	a.cmd = nil
+	a.hashHs = 0
+	a.status = "crashed"
+	m := "Miner stopped unexpectedly"
+	if err != nil {
+		m += " (" + err.Error() + ")"
+	}
+	a.append(m + " — press Start to retry.")
 }
 
 func (a *App) StartMining(address, mode string) error {
@@ -220,7 +245,7 @@ func (a *App) Pause() {
 func (a *App) Resume() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.status != "paused" {
+	if a.status != "paused" && a.status != "crashed" {
 		return
 	}
 	a.append("Resuming…")
