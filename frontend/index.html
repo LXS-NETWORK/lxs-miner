@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>LXS Miner</title>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <span class="brand">◍ <span class="wm">LXS</span> Miner</span>
+    <span class="net" id="netdot">● live</span>
+  </header>
+
+  <!-- SETUP -->
+  <section id="setup">
+    <div class="card">
+      <label class="lbl">Your LXS address <span class="dim">(rewards go here)</span></label>
+      <div class="row">
+        <input id="addr" class="input" placeholder="0x…" autocomplete="off" spellcheck="false"/>
+        <button id="create" class="ghost">Create wallet</button>
+      </div>
+      <p class="hint">No address? Press <b>Create wallet</b> — it makes one and shows you the key to back up.</p>
+    </div>
+
+    <div class="card">
+      <label class="lbl">How to mine</label>
+      <label class="opt"><input type="radio" name="mode" value="pool" checked>
+        <span><b>Pool</b> <em>recommended</em><br><span class="dim">Team up — steady, proportional payouts. Best for normal computers.</span></span></label>
+      <label class="opt"><input type="radio" name="mode" value="solo">
+        <span><b>Solo</b><br><span class="dim">Keep the whole 50 LXS per block, but only when you win one.</span></span></label>
+    </div>
+
+    <button id="start" class="primary">⛏  Start mining</button>
+  </section>
+
+  <!-- MINING -->
+  <section id="mining" style="display:none">
+    <div class="balcard">
+      <div class="baln"><span id="balance">—</span> <span class="balu">LXS</span></div>
+      <div class="ball" id="balfor">your balance</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="sv" id="hashrate">—</div><div class="sl">Hashrate</div></div>
+      <div class="stat"><div class="sv" id="shares">0</div><div class="sl">Shares</div></div>
+      <div class="stat"><div class="sv" id="blocks">0</div><div class="sl">Blocks</div></div>
+    </div>
+    <div class="statusrow">
+      <span id="status" class="ok">● Mining</span>
+      <button id="stop" class="ghost">■ Stop</button>
+    </div>
+    <pre id="log" class="log"></pre>
+  </section>
+
+  <p class="foot">Chain 22540 · lxs-network.github.io</p>
+</div>
+
+<!-- WALLET MODAL -->
+<div id="modal" class="modal" style="display:none">
+  <div class="mbox">
+    <h3>New wallet created</h3>
+    <label class="lbl">Address</label>
+    <div class="mono" id="m-addr"></div>
+    <label class="lbl">Private key <span class="bad">— BACK THIS UP</span></label>
+    <div class="mono key" id="m-key"></div>
+    <div class="warn">Whoever holds this key owns the coins. Save it offline, somewhere safe. It is also stored on this computer at the path below — but keep your own backup too.</div>
+    <div class="mono path" id="m-path"></div>
+    <div class="row">
+      <button id="m-copy" class="ghost">Copy key</button>
+      <button id="m-ok" class="primary sm">I saved it</button>
+    </div>
+  </div>
+</div>
+
+<script src="./src/main.js" type="module"></script>
+</body>
+</html>
