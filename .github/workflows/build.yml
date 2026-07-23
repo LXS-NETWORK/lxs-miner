@@ -1,0 +1,120 @@
+name: build-installers
+
+# Builds native LXS Miner installers for macOS, Windows and Linux and attaches
+# them to the GitHub Release for the pushed tag. The `lxs` core binary is built
+# fresh from the public core repo (it is gitignored here — a build artifact).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CORE_REPO: https://github.com/LXS-NETWORK/LXS
+  GO_TAGS: "pebble,libp2p"
+
+jobs:
+  # ---------------- macOS (universal .dmg) ----------------
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Build lxs core (universal)
+        run: |
+          git clone --depth 1 "$CORE_REPO" core
+          cd core
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -tags "$GO_TAGS" -trimpath -ldflags "-s -w" -o /tmp/lxs-amd64 ./cmd/lxs
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags "$GO_TAGS" -trimpath -ldflags "-s -w" -o /tmp/lxs-arm64 ./cmd/lxs
+          lipo -create -output "$GITHUB_WORKSPACE/binaries/lxs" /tmp/lxs-amd64 /tmp/lxs-arm64
+          chmod +x "$GITHUB_WORKSPACE/binaries/lxs"
+      - name: Wails build
+        run: wails build -platform darwin/universal -trimpath
+      - name: Package .dmg
+        run: |
+          cd build/bin
+          mv lxs-miner.app "LXS Miner.app"
+          xattr -cr "LXS Miner.app" || true
+          codesign --force --deep -s - "LXS Miner.app" || true
+          mkdir stage && cp -R "LXS Miner.app" stage/ && ln -s /Applications stage/Applications
+          hdiutil create -quiet -volname "LXS Miner" -srcfolder stage -ov -format UDZO "LXS-Miner-mac.dmg"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: build/bin/LXS-Miner-mac.dmg
+
+  # ---------------- Windows (.exe NSIS installer) ----------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install NSIS + Wails
+        shell: bash
+        run: |
+          choco install nsis -y
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Build lxs core (windows)
+        shell: bash
+        run: |
+          git clone --depth 1 "$CORE_REPO" core
+          cd core
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags "$GO_TAGS" -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/binaries/lxs" ./cmd/lxs
+      - name: Wails build
+        shell: bash
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          wails build -platform windows/amd64 -nsis -trimpath
+      - name: Rename installer
+        shell: bash
+        run: |
+          cd build/bin
+          f=$(ls *installer*.exe 2>/dev/null | head -1)
+          [ -n "$f" ] && mv "$f" "LXS-Miner-windows-installer.exe" || mv lxs-miner.exe "LXS-Miner-windows.exe"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/bin/LXS-Miner-windows-installer.exe
+            build/bin/LXS-Miner-windows.exe
+
+  # ---------------- Linux (AppImage-ready binary, tar.gz) ----------------
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install deps + Wails
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential pkg-config
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Build lxs core (linux)
+        run: |
+          git clone --depth 1 "$CORE_REPO" core
+          cd core
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "$GO_TAGS" -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/binaries/lxs" ./cmd/lxs
+          chmod +x "$GITHUB_WORKSPACE/binaries/lxs"
+      - name: Wails build
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          wails build -platform linux/amd64 -trimpath
+      - name: Package tar.gz
+        run: |
+          cd build/bin
+          mv lxs-miner "LXS Miner"
+          tar -czf LXS-Miner-linux.tar.gz "LXS Miner"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: build/bin/LXS-Miner-linux.tar.gz

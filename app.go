@@ -322,14 +322,17 @@ func (a *App) GetState() map[string]interface{} {
 	if a.status == "mining" {
 		up += time.Since(a.segStart).Seconds()
 	}
-	share := 0.0
+	frac := 0.0
 	if a.poolHashHs > 0 && a.hashHs > 0 {
-		share = a.hashHs / a.poolHashHs * 100
+		frac = a.hashHs / a.poolHashHs
+		if frac > 1 {
+			frac = 1 // the pool's 2-min average lags; never report >100%
+		}
 	}
+	share := frac * 100
 	// est LXS/day = yourShareOfPool × 50 × blocksPerDay
 	estDay := 0.0
-	if a.poolHashHs > 0 && a.hashHs > 0 && a.blockTime > 0 {
-		frac := a.hashHs / a.poolHashHs
+	if frac > 0 && a.blockTime > 0 {
 		blocksPerDay := 86400.0 / a.blockTime
 		estDay = frac * 50.0 * blocksPerDay
 	}

@@ -42,6 +42,15 @@ body{
 .lbl{display:block;font-size:12.5px;color:var(--dim);margin-bottom:8px}
 .hint{font-size:12px;color:var(--dim);margin:10px 0 2px}.hint b{color:var(--text)}
 
+/* mode radios */
+.opt{display:flex;gap:11px;align-items:flex-start;padding:10px 4px;cursor:pointer}
+.opt input{flex:0 0 auto;margin-top:3px;accent-color:var(--accent)}
+.optbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.optt b{font-size:14px}
+.optd{font-size:12px}
+.opt em{font-style:normal;color:var(--accent);font-size:11px;font-weight:800;margin-left:6px;
+  border:1px solid rgba(70,229,161,.4);border-radius:20px;padding:1px 8px}
+
 .row{display:flex;gap:8px;align-items:center}
 .input{flex:1;background:#0e1118;border:1px solid var(--line);color:var(--text);
   padding:11px 12px;border-radius:11px;font:13px ui-monospace,monospace;outline:none;transition:border-color .15s,box-shadow .15s}
@@ -111,6 +120,7 @@ button:active{transform:translateY(1px)}
 .modal{position:fixed;inset:0;background:rgba(4,6,10,.72);display:flex;align-items:center;justify-content:center;padding:18px;z-index:60}
 .mbox{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line2);border-radius:16px;padding:20px;max-width:460px;width:100%}
 .mbox h3{margin:0 0 12px;font-size:18px}
+.ph{margin:0 0 14px;font-size:19px}
 .mono{background:#0e1118;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:12px ui-monospace,monospace;word-break:break-all;color:var(--text);margin-bottom:10px;user-select:text}
 .mono.key{color:var(--bad)}.mono.path{color:var(--dim);font-size:11px}
 .bad{color:var(--bad);font-weight:700}

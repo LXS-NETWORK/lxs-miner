@@ -22,8 +22,6 @@
       <text x="128" y="132" font-family="Helvetica,Arial" font-weight="800" font-size="54" letter-spacing="2" fill="#eef3fb" text-anchor="middle" dominant-baseline="central">LXS</text>
     </svg>
   </div>
-  <div class="splash-title"><span class="wm">LXS</span> Miner</div>
-  <div class="splash-sub">Proof-of-work Layer-1 · mine it, own it</div>
 </section>
 
 <div class="app" id="mainapp" style="display:none">
@@ -36,13 +34,39 @@
   <section id="setup">
     <div class="card">
       <label class="lbl">Your LXS address <span class="dim">(rewards go here)</span></label>
-      <div class="row">
-        <input id="addr" class="input" placeholder="0x…" autocomplete="off" spellcheck="false"/>
-        <button id="create" class="ghost">Create</button>
-      </div>
-      <p class="hint">No address? Press <b>Create</b> — it makes one and shows you the key to back up.</p>
+      <input id="addr" class="input" style="width:100%" placeholder="0x…" autocomplete="off" spellcheck="false"/>
+      <p class="hint">Don't have one? Press <b>Create wallet</b> below.</p>
     </div>
-    <button id="continue" class="primary">Continue  →</button>
+
+    <div class="card">
+      <label class="lbl">How to mine</label>
+      <label class="opt"><input type="radio" name="mode" value="pool" checked>
+        <span class="optbody"><span class="optt"><b>Pool</b> <em>recommended</em></span><span class="dim optd">Team up — steady, proportional payouts. Best for normal computers.</span></span></label>
+      <label class="opt"><input type="radio" name="mode" value="solo">
+        <span class="optbody"><span class="optt"><b>Solo</b></span><span class="dim optd">Keep the whole 50 LXS per block, but only when you win one.</span></span></label>
+    </div>
+
+    <button id="start" class="primary" style="width:100%">⛏  Start mining</button>
+    <button id="createbtn" class="ghost" style="width:100%;margin-top:10px">Create wallet</button>
+  </section>
+
+  <!-- CREATE WALLET PAGE (inside the app) -->
+  <section id="createpage" style="display:none">
+    <div class="card">
+      <h2 class="ph">Your new wallet</h2>
+      <label class="lbl">Address</label>
+      <div class="mono" id="cw-addr">…</div>
+      <label class="lbl">Private key <span class="bad">— BACK THIS UP</span></label>
+      <div class="mono key" id="cw-key">…</div>
+      <div class="warn">Whoever holds this key owns the coins. Save it offline, somewhere safe. It is also stored on this computer at the path below — but keep your own backup too.</div>
+      <label class="lbl">Saved on this computer at</label>
+      <div class="mono path" id="cw-path">…</div>
+      <div class="row" style="margin-top:12px">
+        <button id="cw-copy" class="ghost" style="flex:1">📋 Copy key</button>
+        <button id="cw-done" class="primary" style="flex:1">I saved it — continue</button>
+      </div>
+    </div>
+    <button id="cw-back" class="linkbtn" style="display:block;margin:0 auto">← Back</button>
   </section>
 
   <!-- DASHBOARD -->
@@ -52,19 +76,12 @@
       <div class="ball">coins collected <span id="balfor" class="dim"></span></div>
     </div>
 
-    <div class="seg" id="modeseg">
-      <button class="segbtn on" data-mode="pool">Pool <em>recommended</em></button>
-      <button class="segbtn" data-mode="solo">Solo</button>
-    </div>
-
     <div class="controls">
-      <button id="start" class="primary">⛏  Start</button>
-      <button id="pause" class="ghost" style="display:none">⏸ Pause</button>
+      <button id="pause" class="ghost">⏸ Pause</button>
       <button id="resume" class="primary" style="display:none">▶ Resume</button>
-      <button id="stop" class="ghost danger" style="display:none">■ Stop</button>
+      <button id="stop" class="ghost danger">■ Stop</button>
     </div>
-
-    <div class="statusrow"><span id="status" class="dim">● Idle</span><span id="uptime" class="dim"></span></div>
+    <div class="statusrow"><span id="status" class="ok">● Mining</span><span id="uptime" class="dim"></span></div>
 
     <div class="chartcard">
       <div class="charttop"><span>Your hashrate</span><span id="hashnow" class="hgrad">—</span></div>
@@ -100,23 +117,6 @@
   </section>
 
   <p class="foot">Chain 22540 · lxs-network.github.io</p>
-</div>
-
-<!-- WALLET MODAL -->
-<div id="modal" class="modal" style="display:none">
-  <div class="mbox">
-    <h3>New wallet created</h3>
-    <label class="lbl">Address</label>
-    <div class="mono" id="m-addr"></div>
-    <label class="lbl">Private key <span class="bad">— BACK THIS UP</span></label>
-    <div class="mono key" id="m-key"></div>
-    <div class="warn">Whoever holds this key owns the coins. Save it offline, somewhere safe. It is also stored on this computer at the path below — but keep your own backup too.</div>
-    <div class="mono path" id="m-path"></div>
-    <div class="row" style="justify-content:flex-end">
-      <button id="m-copy" class="ghost">Copy key</button>
-      <button id="m-ok" class="primary sm">I saved it</button>
-    </div>
-  </div>
 </div>
 
 <div id="toasts"></div>
