@@ -63,14 +63,15 @@ type App struct {
 	segStart   time.Time
 
 	// network (refreshed by a background poller)
-	netHeight   int64
-	coinsMined  float64
-	minersNow   int
-	poolHashHs  float64
-	difficulty  string
-	blockTime   float64 // seconds
-	poolPaid    string
-	poolBlocks  int
+	netHeight  int64
+	coinsMined float64
+	minersNow  int
+	poolHashHs float64
+	difficulty string
+	diffRaw    int64   // raw difficulty — expected hashes per block
+	blockTime  float64 // seconds
+	poolPaid   string
+	poolBlocks int
 
 	autoStart bool
 
@@ -79,7 +80,9 @@ type App struct {
 	dataDir string
 }
 
-func NewApp() *App { return &App{balance: "—", mode: "pool", status: "idle", difficulty: "—", poolPaid: "0"} }
+func NewApp() *App {
+	return &App{balance: "—", mode: "pool", status: "idle", difficulty: "—", poolPaid: "0"}
+}
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -307,6 +310,7 @@ func (a *App) fetchNetwork() {
 		a.netHeight = height
 		a.coinsMined = coinsMined(height)
 		a.difficulty = groupThousands(fmt.Sprintf("%d", diff))
+		a.diffRaw = diff
 		a.blockTime = blkTime
 	}
 	a.minersNow, a.poolHashHs, a.poolPaid, a.poolBlocks = miners, poolHs, paid, pblocks
@@ -322,20 +326,6 @@ func (a *App) GetState() map[string]interface{} {
 	if a.status == "mining" {
 		up += time.Since(a.segStart).Seconds()
 	}
-	frac := 0.0
-	if a.poolHashHs > 0 && a.hashHs > 0 {
-		frac = a.hashHs / a.poolHashHs
-		if frac > 1 {
-			frac = 1 // the pool's 2-min average lags; never report >100%
-		}
-	}
-	share := frac * 100
-	// est LXS/day = yourShareOfPool × 50 × blocksPerDay
-	estDay := 0.0
-	if frac > 0 && a.blockTime > 0 {
-		blocksPerDay := 86400.0 / a.blockTime
-		estDay = frac * 50.0 * blocksPerDay
-	}
 	remaining := totalMined - a.coinsMined
 	if remaining < 0 {
 		remaining = 0
@@ -346,6 +336,32 @@ func (a *App) GetState() map[string]interface{} {
 	reward := 50.0
 	for i := int64(0); i < era; i++ {
 		reward /= 2
+	}
+
+	// Mode-aware stats. Share-of-pool and live-miner-count only exist in pool
+	// mode; showing 0.00% / 0 in solo read as "broken" (a real user complaint).
+	// Est/day and block time derive from difficulty (= expected hashes/block):
+	// measuring block time from chain timestamps is garbage on a young chain
+	// with idle gaps (it once showed "530 min").
+	shareStr, minersStr := "—", "—"
+	estDay, expectSec := 0.0, 0.0
+	if a.mode == "pool" {
+		frac := 0.0
+		if a.poolHashHs > 0 && a.hashHs > 0 {
+			frac = a.hashHs / a.poolHashHs
+			if frac > 1 {
+				frac = 1 // the pool's average lags; never report >100%
+			}
+		}
+		shareStr = fmt.Sprintf("%.2f%%", frac*100)
+		minersStr = fmt.Sprintf("%d", a.minersNow)
+		if a.diffRaw > 0 && a.poolHashHs > 0 {
+			expectSec = float64(a.diffRaw) / a.poolHashHs
+			estDay = frac * reward * (86400.0 / expectSec)
+		}
+	} else if a.diffRaw > 0 && a.hashHs > 0 { // solo: you alone vs the difficulty
+		expectSec = float64(a.diffRaw) / a.hashHs
+		estDay = reward * (86400.0 / expectSec)
 	}
 	tail := a.logbuf
 	if len(tail) > 120 {
@@ -361,17 +377,17 @@ func (a *App) GetState() map[string]interface{} {
 		"shares":     a.shares,
 		"blocks":     a.blocks,
 		"uptime":     fmtDuration(up),
-		"sharePct":   fmt.Sprintf("%.2f%%", share),
-		"estPerDay":  fmt.Sprintf("%.2f", estDay),
+		"sharePct":   shareStr,
+		"estPerDay":  fmtEstDay(estDay),
 		"netHeight":  groupThousands(fmt.Sprintf("%d", a.netHeight)),
 		"coinsMined": fmt.Sprintf("%.0f", a.coinsMined),
 		"coinsLeft":  groupThousands(fmt.Sprintf("%.0f", remaining)),
 		"minedPct":   a.coinsMined / totalMined * 100,
 		"reward":     rewardStr(reward),
-		"minersNow":  a.minersNow,
+		"minersNow":  minersStr,
 		"poolHash":   fmtHash(a.poolHashHs),
 		"difficulty": a.difficulty,
-		"blockTime":  fmtBlockTime(a.blockTime),
+		"blockTime":  fmtBlockTime(expectSec),
 		"poolPaid":   a.poolPaid,
 		"poolBlocks": a.poolBlocks,
 		"log":        strings.Join(tail, "\n"),
@@ -405,6 +421,19 @@ func fmtHash(hs float64) string {
 		return fmt.Sprintf("%.1f kH/s", hs/1e3)
 	}
 	return fmt.Sprintf("%.0f H/s", hs)
+}
+
+// fmtEstDay formats estimated LXS/day: "—" when unknown, whole numbers with
+// thousand grouping when large (a lone early miner sees ~14,400/day), decimals
+// when small (a pool sliver).
+func fmtEstDay(v float64) string {
+	if v <= 0 {
+		return "—"
+	}
+	if v >= 100 {
+		return groupThousands(fmt.Sprintf("%.0f", v))
+	}
+	return fmt.Sprintf("%.2f", v)
 }
 
 func fmtBlockTime(s float64) string {
