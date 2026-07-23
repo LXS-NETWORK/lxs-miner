@@ -34,7 +34,7 @@ const (
 	poolURL     = "https://lxsnetwork.duckdns.org"
 	rpcURL      = "https://lxsnetwork.duckdns.org"
 	seed        = "/ip4/79.72.25.166/tcp/30303/p2p/12D3KooWRSSSocSqWG978SWKpimQsti4WkmjytQX7g1qgJKnNzuA"
-	totalMined  = 100000000.0 // LXS mined over ~500 years
+	totalMined  = 50000000.0  // LXS mined via block rewards (25/block, halving every 1M)
 	totalBlocks = 66000000    // approx blocks until the reward rounds to zero
 	halving     = 1000000
 )
@@ -375,7 +375,7 @@ func (a *App) GetState() map[string]interface{} {
 	// Current block reward at this height (halves every 1,000,000 blocks) — far
 	// clearer than "blocks left", since blocks don't all pay 50 LXS.
 	era := a.netHeight / halving
-	reward := 50.0
+	reward := 25.0
 	for i := int64(0); i < era; i++ {
 		reward /= 2
 	}
@@ -440,7 +440,7 @@ func (a *App) GetState() map[string]interface{} {
 // ---------- helpers ----------
 
 func coinsMined(height int64) float64 {
-	reward, era, total, h := 50.0, int64(halving), 0.0, height
+	reward, era, total, h := 25.0, int64(halving), 0.0, height
 	for h > 0 && reward >= 1e-9 {
 		take := h
 		if take > era {
